@@ -55,7 +55,7 @@
             // 
             // btnStop
             // 
-            btnStop.Location = new Point(278, 183);
+            btnStop.Location = new Point(240, 183);
             btnStop.Name = "btnStop";
             btnStop.Size = new Size(95, 33);
             btnStop.TabIndex = 11;
@@ -65,7 +65,7 @@
             // 
             // btnStart
             // 
-            btnStart.Location = new Point(177, 183);
+            btnStart.Location = new Point(139, 183);
             btnStart.Name = "btnStart";
             btnStart.Size = new Size(95, 33);
             btnStart.TabIndex = 10;
