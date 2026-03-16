@@ -10,7 +10,7 @@
 
 <br/>
 
-🇹🇷 [Türkçe](#türkçe) &nbsp;|&nbsp; 🇬🇧 [English](#english)
+🇹🇷 [Türkçe](#türkçe) &nbsp;|&nbsp; 🇺🇸 [English](#english)
 
 </div>
 
@@ -105,11 +105,12 @@ Pull request'ler açıktır. Büyük değişiklikler için önce bir issue açma
 
 ## Yapım Süreci
 
-Bu uygulama tamamen yapay zeka ile geliştirilmiştir.
+Bu uygulama tek satır kod yazmadan, yapay zeka ile geliştirilmiştir.
 
-- 💬 Fikir, yönlendirme ve tasarım kararları: Ben ✋
+- 💬 Fikir, yönlendirme ve tasarım kararları: [Neşet Çolak](https://github.com/nesetcolak)
 - 🤖 Kod yazımı: [Google Gemini](https://gemini.google.com) & [Anthropic Claude](https://claude.ai)
 
+> Bir insan ne isteyeceğini bilirse, yapay zeka nasıl yapılacağını bilir.
 
 <br/>
 
@@ -204,11 +205,12 @@ Pull requests are welcome. For major changes, please open an issue first.
 
 ## Development Process
 
-This application was built entirely with AI
+This application was built entirely with AI — not a single line of code was written by hand.
 
-- 💬 Idea, direction and design decisions: Me ✋
+- 💬 Idea, direction and design decisions: [Neşet Çolak](https://github.com/nesetcolak)
 - 🤖 Code generation: [Google Gemini](https://gemini.google.com) & [Anthropic Claude](https://claude.ai)
 
+> If a human knows what to build, AI knows how to build it.
 
 <br/>
 
