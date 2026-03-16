@@ -105,9 +105,9 @@ Pull request'ler açıktır. Büyük değişiklikler için önce bir issue açma
 
 ## Yapım Süreci
 
-Bu uygulama tek satır kod yazmadan, yapay zeka ile geliştirilmiştir.
+Bu uygulama tamamen yapay zeka ile geliştirilmiştir.
 
-- 💬 Fikir, yönlendirme ve tasarım kararları: [Neşet Çolak](https://github.com/nesetcolak)
+- 💬 Fikir, yönlendirme ve tasarım kararları: Ben ✋
 - 🤖 Kod yazımı: [Google Gemini](https://gemini.google.com) & [Anthropic Claude](https://claude.ai)
 
 
@@ -204,9 +204,9 @@ Pull requests are welcome. For major changes, please open an issue first.
 
 ## Development Process
 
-This application was built entirely with AI — not a single line of code was written by hand.
+This application was built entirely with AI
 
-- 💬 Idea, direction and design decisions: [Neşet Çolak](https://github.com/nesetcolak)
+- 💬 Idea, direction and design decisions: Me ✋
 - 🤖 Code generation: [Google Gemini](https://gemini.google.com) & [Anthropic Claude](https://claude.ai)
 
 
