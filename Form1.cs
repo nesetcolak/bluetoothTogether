@@ -12,7 +12,7 @@ using System.Runtime.InteropServices;
 namespace bluetoothTogetheForms
 {
     public partial class Form1 : Form
-    {
+    {//s
         private WasapiLoopbackCapture capture;
         private List<WasapiOut> outputs = new List<WasapiOut>();
         private List<BufferedWaveProvider> buffers = new List<BufferedWaveProvider>();
