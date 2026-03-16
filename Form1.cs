@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -29,567 +30,761 @@ namespace bluetoothTogetheForms
         private ContextMenuStrip trayMenu;
         private bool gercektenKapat = false;
 
-        // Ses seviyesi senkronizasyonu için
         private System.Windows.Forms.Timer volumeSyncTimer;
         private float lastVolume = -1f;
         private bool lastMute = false;
 
-        // Yeni buton
+        // Yeni UI elemanları
         private Button btnReset;
+        private Panel pnlDeviceCards;
+        private Panel pnlStatusBar;
+        private Label lblStatusDot;
+        private Label lblStatusText;
+        private Panel pnlSignal;
+        private System.Windows.Forms.Timer signalTimer;
+        private int signalFrame = 0;
+        private bool isRunning = false;
+
+        // Renk paleti
+        private readonly Color BG_DEEP = Color.FromArgb(13, 13, 15);
+        private readonly Color BG_CARD = Color.FromArgb(22, 22, 26);
+        private readonly Color BG_SURFACE = Color.FromArgb(30, 30, 36);
+        private readonly Color ACCENT = Color.FromArgb(0, 212, 255);
+        private readonly Color ACCENT2 = Color.FromArgb(0, 255, 180);
+        private readonly Color DANGER = Color.FromArgb(255, 60, 80);
+        private readonly Color TEXT_PRI = Color.FromArgb(240, 240, 245);
+        private readonly Color TEXT_SEC = Color.FromArgb(120, 120, 135);
+        private readonly Color BORDER = Color.FromArgb(45, 45, 55);
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
         private const int DWMWA_MICA_EFFECT = 1029;
         private const int DWMWA_CAPTION_COLOR = 35;
+
+        private const int DWMWA_BORDER_COLOR = 34;
+        private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+        private const int DWMSBT_NONE = 1;
+
+        private Panel customTitleBar;
+        private Point _dragStart;
+        private bool _dragging;
 
         public Form1()
         {
             InitializeComponent();
 
+            // Native başlık çubuğunu kaldır
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.Manual; // CenterScreen, None ile güvenilmez
+
+            // DWM koyu mod (taskbar önizleme için)
             int darkMode = 1;
             DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
 
-            int captionColor = ColorTranslator.ToWin32(Color.FromArgb(28, 28, 28));
-            DwmSetWindowAttribute(this.Handle, DWMWA_CAPTION_COLOR, ref captionColor, sizeof(int));
+            // Backdrop yok
+            int noBackdrop = DWMSBT_NONE;
+            DwmSetWindowAttribute(this.Handle, DWMWA_SYSTEMBACKDROP_TYPE, ref noBackdrop, sizeof(int));
+            int micaOff = 0;
+            DwmSetWindowAttribute(this.Handle, DWMWA_MICA_EFFECT, ref micaOff, sizeof(int));
 
-            int mica = 1;
-            DwmSetWindowAttribute(this.Handle, DWMWA_MICA_EFFECT, ref mica, sizeof(int));
-
-            ApplyModernTheme();
+            BuildUI();
         }
 
-        private void ApplyModernTheme()
+        // Drag metodları — customTitleBar ve lblTitleBar'a bağlanır
+        private void TitleBar_MouseDown(object sender, MouseEventArgs e)
         {
-            this.BackColor = Color.FromArgb(28, 28, 28);
-            this.ForeColor = Color.White;
-            this.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            this.Text = "BluetoothTogether";
-
-            lblStatus.AutoSize = false;
-            lblStatus.Width = clbDevices.Width;
-            lblStatus.TextAlign = ContentAlignment.MiddleCenter;
-            lblStatus.ForeColor = Color.FromArgb(255, 165, 0);
-
-            clbDevices.BackColor = Color.FromArgb(45, 45, 45);
-            clbDevices.ForeColor = Color.White;
-            clbDevices.BorderStyle = BorderStyle.None;
-            clbDevices.CheckOnClick = true;
-
-            StyleButton(btnStart, Color.White, Color.Black, "START");
-            StyleButton(btnStop, Color.White, Color.Black, "STOP");
-
-            // Reset butonunu dinamik olarak ekle (Designer'da yoksa)
-            btnReset = new Button();
-            btnReset.Size = new Size(80, btnStart.Height);
-            // btnStart'ın sağına koy — konumu formdaki düzene göre ayarla
-            btnReset.Location = new Point(btnStop.Right + 10, btnStop.Top);
-            btnReset.Anchor = btnStop.Anchor;
-            StyleButton(btnReset, Color.FromArgb(60, 60, 60), Color.White, "↺ RESET");
-            btnReset.FlatAppearance.BorderSize = 1;
-            btnReset.FlatAppearance.BorderColor = Color.FromArgb(100, 100, 100);
-            btnReset.FlatAppearance.MouseOverBackColor = Color.FromArgb(80, 80, 80);
-            btnReset.Click += BtnReset_Click;
-            this.Controls.Add(btnReset);
-
-            // Tray
-            trayMenu = new ContextMenuStrip();
-            trayMenu.Items.Add("Göster", null, OnShowClick);
-            trayMenu.Items.Add("Çıkış", null, OnExitClick);
-
-            trayIcon = new NotifyIcon();
-            trayIcon.Text = "BluetoothTogether";
-            trayIcon.Icon = this.Icon;
-            trayIcon.ContextMenuStrip = trayMenu;
-            trayIcon.Visible = true;
-            trayIcon.DoubleClick += TrayIcon_DoubleClick;
-
-            // Ses senkronizasyon timer'ı - 250ms yeterli, daha sık yazmak audio pipeline'ını yoruyor
-            volumeSyncTimer = new System.Windows.Forms.Timer();
-            volumeSyncTimer.Interval = 250;
-            volumeSyncTimer.Tick += VolumeSyncTimer_Tick;
-        }
-
-        private void StyleButton(Button btn, Color backColor, Color textColor, string text)
-        {
-            btn.FlatStyle = FlatStyle.Flat;
-            btn.FlatAppearance.BorderSize = 0;
-            btn.BackColor = backColor;
-            btn.ForeColor = textColor;
-            btn.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            btn.Cursor = Cursors.Hand;
-            btn.Text = text;
-            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 200, 200);
-        }
-
-        private async void Form1_Load(object sender, EventArgs e)
-        {
-            // === VB-AUDIO KURULUM KONTROLÜ ===
-            if (!IsVirtualCableInstalled())
+            if (e.Button == MouseButtons.Left)
             {
-                ShowVirtualCableInstallPrompt();
-                return;
+                _dragging = true;
+                _dragStart = e.Location;
+                if (sender is Control c) _dragStart = c.PointToScreen(e.Location);
+                _dragStart = new Point(_dragStart.X - this.Left, _dragStart.Y - this.Top);
             }
-
-            await InitializeDevicesAsync();
+        }
+        private void TitleBar_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_dragging)
+            {
+                var cur = Control.MousePosition;
+                this.Location = new Point(cur.X - _dragStart.X, cur.Y - _dragStart.Y);
+            }
+        }
+        private void TitleBar_MouseUp(object sender, MouseEventArgs e)
+        {
+            _dragging = false;
         }
 
-        /// <summary>
-        /// VB-Audio Virtual Cable'ın sistemde kurulu olup olmadığını kontrol eder.
-        /// </summary>
-        private bool IsVirtualCableInstalled()
+        // ══════════════════════════════════════════════════
+        // UI BUILDER
+        // ══════════════════════════════════════════════════
+        private void BuildUI()
         {
+            // Designer kontrollerini gizle, kendi UI'mızı kullanıyoruz
+            lblStatus.Visible = false;
+            clbDevices.Visible = false;
+            btnStart.Visible = false;
+            btnStop.Visible = false;
+
+            this.BackColor = BG_DEEP;
+            this.ForeColor = TEXT_PRI;
+            this.Size = new Size(420, 540);
+            this.MinimumSize = new Size(420, 480);
+            this.Text = "BluetoothTogether";
+            this.Font = new Font("Segoe UI", 9.5F);
+            this.Padding = new Padding(0);
+
+            // ── CUSTOM TITLEBAR (native başlık yok, kendi çiziyoruz) ──────
+            // Üst şerit: ikon + başlık + sinyal + pencere butonları
+            customTitleBar = new Panel { Dock = DockStyle.Top, Height = 32, BackColor = BG_DEEP };
+            customTitleBar.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(35, 35, 42), 1);
+                e.Graphics.DrawLine(pen, 0, customTitleBar.Height - 1, customTitleBar.Width, customTitleBar.Height - 1);
+            };
+
+            // Sol: Gerçek uygulama ikonu (16x16)
+            var picIcon = new PictureBox
+            {
+                Size = new Size(16, 16),
+                Location = new Point(10, 8),
+                BackColor = Color.Transparent,
+                SizeMode = PictureBoxSizeMode.StretchImage
+            };
+            // İkonu yükle: önce exe'ye gömülü resource'dan, sonra dosyadan dene
             try
             {
-                var tempEnumerator = new MMDeviceEnumerator();
-                var allDevices = tempEnumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
-                return allDevices.Any(d =>
-                    d.FriendlyName.IndexOf("VB-Audio", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    d.FriendlyName.IndexOf("CABLE Input", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    d.FriendlyName.IndexOf("bluetoothTogether", StringComparison.OrdinalIgnoreCase) >= 0);
+                // Gömülü ikon (Properties → Application → Icon ile seçilen)
+                var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (exeIcon != null)
+                    picIcon.Image = exeIcon.ToBitmap();
             }
             catch
             {
-                return false;
+                try
+                {
+                    string icoPath = System.IO.Path.Combine(
+                        System.IO.Path.GetDirectoryName(Application.ExecutablePath), "app_icon.ico");
+                    if (System.IO.File.Exists(icoPath))
+                        picIcon.Image = new Icon(icoPath, 16, 16).ToBitmap();
+                }
+                catch { }
             }
-        }
 
-        /// <summary>
-        /// VB-Audio kurulu değilse kullanıcıya açıklayıcı bir ekran gösterir.
-        /// </summary>
-        private void ShowVirtualCableInstallPrompt()
-        {
-            // Mevcut kontrolleri gizle
-            btnStart.Visible = false;
-            btnStop.Visible = false;
-            if (btnReset != null) btnReset.Visible = false;
-            clbDevices.Visible = false;
-            lblStatus.Visible = false;
-
-            // Bilgi paneli oluştur
-            var panel = new Panel
+            // Pencere başlığı
+            var lblTitleBar = new Label
             {
-                Dock = DockStyle.Fill,
+                Text = "BluetoothTogether",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = Color.FromArgb(160, 160, 170),
+                AutoSize = true,
+                Location = new Point(32, 8),
+                BackColor = Color.Transparent
+            };
+
+            // Sağ butonlar — Dock=Right panel içine koy, Anchor sorununu bypass et
+            var pnlWinBtns = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 92,   // 46 + 46
+                BackColor = Color.Transparent
+            };
+
+            var btnMinimize = new Button
+            {
+                Text = "─",
+                Size = new Size(46, 32),
+                Location = new Point(0, 0),
+                FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
-                Padding = new Padding(20)
+                ForeColor = Color.FromArgb(160, 160, 170),
+                Font = new Font("Segoe UI", 10F),
+                Cursor = Cursors.Hand
+            };
+            btnMinimize.FlatAppearance.BorderSize = 0;
+            btnMinimize.FlatAppearance.MouseOverBackColor = Color.FromArgb(50, 50, 58);
+            btnMinimize.MouseEnter += (s, e) => btnMinimize.ForeColor = Color.White;
+            btnMinimize.MouseLeave += (s, e) => btnMinimize.ForeColor = Color.FromArgb(160, 160, 170);
+            btnMinimize.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
+
+            var btnClose = new Button
+            {
+                Text = "✕",
+                Size = new Size(46, 32),
+                Location = new Point(46, 0),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = Color.FromArgb(160, 160, 170),
+                Font = new Font("Segoe UI", 10F),
+                Cursor = Cursors.Hand
+            };
+            btnClose.FlatAppearance.BorderSize = 0;
+            btnClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 43, 28);
+            btnClose.MouseEnter += (s, e) => btnClose.ForeColor = Color.White;
+            btnClose.MouseLeave += (s, e) => btnClose.ForeColor = Color.FromArgb(160, 160, 170);
+            btnClose.Click += (s, e) => Form1_FormClosing_Manual();
+
+            pnlWinBtns.Controls.Add(btnMinimize);
+            pnlWinBtns.Controls.Add(btnClose);
+
+            customTitleBar.Controls.Add(pnlWinBtns);   // Dock=Right önce ekle
+            customTitleBar.Controls.Add(picIcon);
+            customTitleBar.Controls.Add(lblTitleBar);
+
+            // Drag event'lerini titlebar ve içindeki label/ikon'a bağla
+            // (Panel'in boş alanına + label'a tıklayınca sürüklensin)
+            customTitleBar.MouseDown += TitleBar_MouseDown;
+            customTitleBar.MouseMove += TitleBar_MouseMove;
+            customTitleBar.MouseUp += TitleBar_MouseUp;
+            lblTitleBar.MouseDown += TitleBar_MouseDown;
+            lblTitleBar.MouseMove += TitleBar_MouseMove;
+            lblTitleBar.MouseUp += TitleBar_MouseUp;
+            picIcon.MouseDown += TitleBar_MouseDown;
+            picIcon.MouseMove += TitleBar_MouseMove;
+            picIcon.MouseUp += TitleBar_MouseUp;
+
+            // ── HEADER (logo + sinyal) ────────────────────
+            var pnlHeader = new Panel { Dock = DockStyle.Top, Height = 80, BackColor = BG_CARD };
+            pnlHeader.Paint += (s, e) =>
+            {
+                using var pen = new Pen(BORDER, 1);
+                e.Graphics.DrawLine(pen, 0, pnlHeader.Height - 1, pnlHeader.Width, pnlHeader.Height - 1);
+                using var gb = new LinearGradientBrush(new Point(0, 10), new Point(0, 66), Color.FromArgb(0, ACCENT), ACCENT);
+                e.Graphics.FillRectangle(gb, 0, 10, 3, 56);
             };
 
             var lblTitle = new Label
             {
-                Text = "⚠ Sanal Ses Sürücüsü Gerekli",
+                Text = "BLUETOOTH TOGETHER",
                 Font = new Font("Segoe UI", 13F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(255, 165, 0),
-                AutoSize = false,
-                Width = 400,
-                Height = 30,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Location = new Point(20, 30)
+                ForeColor = TEXT_PRI,
+                AutoSize = true,
+                Location = new Point(22, 14)
+            };
+            var lblSub = new Label
+            {
+                Text = "Multi-device audio router",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = TEXT_SEC,
+                AutoSize = true,
+                Location = new Point(23, 40)
             };
 
-            var lblInfo = new Label
+            // Sinyal animasyonu
+            pnlSignal = new Panel { Size = new Size(52, 28), BackColor = Color.Transparent, Location = new Point(348, 26) };
+            pnlSignal.Paint += PnlSignal_Paint;
+            signalTimer = new System.Windows.Forms.Timer { Interval = 110 };
+            signalTimer.Tick += (s, e) => { signalFrame = (signalFrame + 1) % 8; pnlSignal.Invalidate(); };
+
+            pnlHeader.Controls.Add(lblTitle);
+            pnlHeader.Controls.Add(lblSub);
+            pnlHeader.Controls.Add(pnlSignal);
+
+            // ── STATUS BAR ───────────────────────────────
+            pnlStatusBar = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = BG_SURFACE };
+            pnlStatusBar.Paint += (s, e) =>
             {
-                Text = "BluetoothTogether'ın çalışabilmesi için sisteminizde\n" +
-                       "\"VB-Audio Virtual Cable\" kurulu olması gerekiyor.\n\n" +
-                       "Tamamen ücretsizdir, kurulumu 1 dakika alır.\n" +
-                       "Kurduktan sonra uygulamayı yeniden başlatın.",
-                Font = new Font("Segoe UI", 10F),
-                ForeColor = Color.FromArgb(200, 200, 200),
-                AutoSize = false,
-                Width = 400,
-                Height = 100,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Location = new Point(20, 75)
+                using var pen = new Pen(BORDER, 1);
+                e.Graphics.DrawLine(pen, 0, pnlStatusBar.Height - 1, pnlStatusBar.Width, pnlStatusBar.Height - 1);
             };
 
-            var btnDownload = new Button
+            lblStatusDot = new Label { Text = "●", Font = new Font("Segoe UI", 9F), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(22, 10) };
+            lblStatusText = new Label { Text = "Başlatılıyor...", Font = new Font("Segoe UI", 9F), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(40, 10) };
+            pnlStatusBar.Controls.Add(lblStatusDot);
+            pnlStatusBar.Controls.Add(lblStatusText);
+
+            // ── DEVICE LABEL ─────────────────────────────
+            var pnlDevLabel = new Panel { Dock = DockStyle.Top, Height = 34, BackColor = Color.Transparent };
+            var lblDev = new Label { Text = "ÇIKIŞ CİHAZLARI", Font = new Font("Segoe UI", 8F, FontStyle.Bold), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(22, 13) };
+            pnlDevLabel.Controls.Add(lblDev);
+
+            // ── DEVICE CARDS ─────────────────────────────
+            pnlDeviceCards = new Panel { Dock = DockStyle.Top, Height = 220, BackColor = Color.Transparent, AutoScroll = true, Padding = new Padding(14, 0, 14, 0) };
+
+            // ── BUTTON ROW ───────────────────────────────
+            var pnlBtns = new Panel { Dock = DockStyle.Bottom, Height = 76, BackColor = BG_CARD };
+            pnlBtns.Paint += (s, e) => { using var pen = new Pen(BORDER, 1); e.Graphics.DrawLine(pen, 0, 0, pnlBtns.Width, 0); };
+
+            var btnStartNew = MakeButton("▶  BAŞLAT", ACCENT, BG_DEEP, true);
+            btnStartNew.Size = new Size(156, 44);
+            btnStartNew.Location = new Point(14, 16);
+            btnStartNew.Click += (s, e) => BtnStartNew_Click();
+
+            var btnStopNew = MakeButton("■  DURDUR", BG_SURFACE, TEXT_SEC, false);
+            btnStopNew.Size = new Size(118, 44);
+            btnStopNew.Location = new Point(178, 16);
+            btnStopNew.Enabled = false;
+
+            btnReset = MakeButton("↺", BG_SURFACE, TEXT_SEC, false);
+            btnReset.Size = new Size(44, 44);
+            btnReset.Location = new Point(304, 16);
+            btnReset.Font = new Font("Segoe UI", 14F);
+            btnReset.Click += BtnReset_Click;
+
+            // btnStop.Click handler'ı
+            btnStopNew.Click += (s, e) => StopAudioRouting();
+
+            // Tag ile referans sakla
+            btnStart.Tag = btnStartNew;
+            btnStop.Tag = btnStopNew;
+
+            pnlBtns.Controls.Add(btnStartNew);
+            pnlBtns.Controls.Add(btnStopNew);
+            pnlBtns.Controls.Add(btnReset);
+
+            // ── ASSEMBLE ─────────────────────────────────
+            this.Controls.Clear();
+            // Gizli eski kontrolleri event handler uyumluluğu için geri ekle
+            this.Controls.Add(lblStatus);
+            this.Controls.Add(clbDevices);
+            this.Controls.Add(btnStart);
+            this.Controls.Add(btnStop);
+            // Yeni UI
+            this.Controls.Add(pnlBtns);
+            this.Controls.Add(pnlDeviceCards);
+            this.Controls.Add(pnlDevLabel);
+            this.Controls.Add(pnlStatusBar);
+            this.Controls.Add(pnlHeader);
+            this.Controls.Add(customTitleBar);
+
+            // ── TRAY ─────────────────────────────────────
+            trayMenu = new ContextMenuStrip();
+            trayMenu.Items.Add("Göster", null, OnShowClick);
+            trayMenu.Items.Add("Çıkış", null, OnExitClick);
+            trayIcon = new NotifyIcon { Text = "BluetoothTogether", Icon = this.Icon, ContextMenuStrip = trayMenu, Visible = true };
+            trayIcon.DoubleClick += TrayIcon_DoubleClick;
+
+            // ── VOLUME SYNC TIMER ────────────────────────
+            volumeSyncTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            volumeSyncTimer.Tick += VolumeSyncTimer_Tick;
+        }
+
+        // ── Sinyal animasyonu ────────────────────────────
+        private void PnlSignal_Paint(object sender, PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            int[] heights = { 4, 8, 14, 20, 14, 8, 4, 10 };
+            int barW = 4, gap = 3;
+            for (int i = 0; i < 6; i++)
             {
-                Text = "⬇  VB-Audio'yu İndir (vb-audio.com)",
-                Size = new Size(320, 42),
-                Location = new Point(60, 190),
+                int h = isRunning ? heights[(signalFrame + i) % heights.Length] : 4;
+                var color = isRunning ? Color.FromArgb(Math.Min(255, 80 + i * 30), ACCENT2) : Color.FromArgb(40, TEXT_SEC);
+                using var brush = new SolidBrush(color);
+                int x = i * (barW + gap);
+                int y = (24 - h) / 2;
+                e.Graphics.FillRectangle(brush, x, y, barW, h);
+            }
+        }
+
+        // ── Buton factory ────────────────────────────────
+        private Button MakeButton(string text, Color back, Color fore, bool isAccent)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = back,
+                ForeColor = fore,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+                TextAlign = ContentAlignment.MiddleCenter
             };
-            StyleButton(btnDownload, Color.FromArgb(255, 165, 0), Color.Black, "⬇  VB-Audio'yu İndir (vb-audio.com)");
-            btnDownload.Click += (s, e) =>
+            btn.FlatAppearance.BorderSize = isAccent ? 0 : 1;
+            btn.FlatAppearance.BorderColor = BORDER;
+            btn.FlatAppearance.MouseOverBackColor = isAccent
+                ? Color.FromArgb(0, 190, 230)
+                : Color.FromArgb(40, 40, 50);
+            return btn;
+        }
+
+        // ── Cihaz kartları ───────────────────────────────
+        private void RebuildDeviceCards()
+        {
+            pnlDeviceCards.Controls.Clear();
+            clbDevices.Items.Clear();
+            int y = 6;
+
+            for (int i = 0; i < availableDevices.Count; i++)
             {
-                Process.Start(new ProcessStartInfo
+                var dev = availableDevices[i];
+                bool autoChecked =
+                    dev.FriendlyName.IndexOf("Kulaklık", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    dev.FriendlyName.IndexOf("Headphone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    dev.FriendlyName.IndexOf("Bluetooth", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    dev.FriendlyName.IndexOf("Stereo", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                clbDevices.Items.Add(dev.FriendlyName);
+                if (autoChecked) clbDevices.SetItemChecked(i, true);
+
+                var card = BuildDeviceCard(dev.FriendlyName, autoChecked, i);
+                card.Location = new Point(0, y);
+                card.Width = pnlDeviceCards.ClientSize.Width - 4;
+                card.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
+                pnlDeviceCards.Controls.Add(card);
+                y += card.Height + 6;
+            }
+
+            pnlDeviceCards.Height = Math.Max(90, y + 6);
+            this.Height = Math.Max(420, Math.Min(680, 96 + 36 + 34 + pnlDeviceCards.Height + 76 + 24));
+        }
+
+        private Panel BuildDeviceCard(string name, bool isChecked, int index)
+        {
+            var card = new Panel { Height = 52, BackColor = BG_CARD, Cursor = Cursors.Hand, Tag = isChecked };
+
+            card.Paint += (s, e) =>
+            {
+                bool sel = (bool)card.Tag;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var pen = new Pen(sel ? Color.FromArgb(55, ACCENT) : BORDER, 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
+                if (sel)
                 {
-                    FileName = "https://vb-audio.com/Cable/",
-                    UseShellExecute = true
-                });
+                    using var gb = new LinearGradientBrush(new Point(0, 8), new Point(0, card.Height - 8), Color.FromArgb(0, ACCENT), ACCENT);
+                    e.Graphics.FillRectangle(gb, 0, 8, 3, card.Height - 16);
+                }
             };
 
-            var btnRecheck = new Button
+            var chk = new Label
             {
-                Text = "✓  Kurdum, Tekrar Kontrol Et",
-                Size = new Size(320, 42),
-                Location = new Point(60, 245),
+                Size = new Size(22, 22),
+                Location = new Point(14, 15),
+                BackColor = Color.Transparent,
+                ForeColor = isChecked ? ACCENT : TEXT_SEC,
+                Text = isChecked ? "◉" : "○",
+                Font = new Font("Segoe UI", 12F),
+                TextAlign = ContentAlignment.MiddleCenter,
                 Cursor = Cursors.Hand
             };
-            StyleButton(btnRecheck, Color.FromArgb(60, 60, 60), Color.White, "✓  Kurdum, Tekrar Kontrol Et");
-            btnRecheck.FlatAppearance.BorderSize = 1;
-            btnRecheck.FlatAppearance.BorderColor = Color.FromArgb(100, 100, 100);
-            btnRecheck.FlatAppearance.MouseOverBackColor = Color.FromArgb(80, 80, 80);
-            btnRecheck.Click += async (s, e) =>
+
+            string shortName = name.Length > 44 ? name.Substring(0, 42) + "…" : name;
+            var lblN = new Label
             {
-                if (IsVirtualCableInstalled())
-                {
-                    // Kurulmuş! Paneli kaldır ve normal akışa devam et
-                    panel.Visible = false;
-                    btnStart.Visible = true;
-                    btnStop.Visible = true;
-                    if (btnReset != null) btnReset.Visible = true;
-                    clbDevices.Visible = true;
-                    lblStatus.Visible = true;
-                    await InitializeDevicesAsync();
-                }
-                else
-                {
-                    MessageBox.Show(
-                        "VB-Audio hâlâ bulunamadı.\n\nLütfen kurulumu tamamlayıp bilgisayarınızı yeniden başlatın.",
-                        "Bulunamadı",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                }
+                Text = shortName,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                ForeColor = isChecked ? TEXT_PRI : TEXT_SEC,
+                AutoSize = false,
+                Size = new Size(card.Width - 68, 20),
+                Location = new Point(44, 8),
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+            };
+            var lblT = new Label
+            {
+                Text = GetDeviceTypeLabel(name),
+                Font = new Font("Segoe UI", 7.5F),
+                ForeColor = Color.FromArgb(75, 75, 90),
+                AutoSize = true,
+                Location = new Point(44, 28),
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand
             };
 
-            panel.Controls.Add(lblTitle);
-            panel.Controls.Add(lblInfo);
-            panel.Controls.Add(btnDownload);
-            panel.Controls.Add(btnRecheck);
-            this.Controls.Add(panel);
-            panel.BringToFront();
+            void Toggle()
+            {
+                bool ns = !(bool)card.Tag;
+                card.Tag = ns;
+                chk.Text = ns ? "◉" : "○";
+                chk.ForeColor = ns ? ACCENT : TEXT_SEC;
+                lblN.ForeColor = ns ? TEXT_PRI : TEXT_SEC;
+                card.Invalidate();
+                if (index < clbDevices.Items.Count) clbDevices.SetItemChecked(index, ns);
+            }
+
+            card.Click += (s, e) => Toggle();
+            chk.Click += (s, e) => Toggle();
+            lblN.Click += (s, e) => Toggle();
+            lblT.Click += (s, e) => Toggle();
+
+            card.Controls.Add(chk);
+            card.Controls.Add(lblN);
+            card.Controls.Add(lblT);
+            return card;
+        }
+
+        private string GetDeviceTypeLabel(string name)
+        {
+            if (name.IndexOf("Bluetooth", StringComparison.OrdinalIgnoreCase) >= 0) return "BLUETOOTH";
+            if (name.IndexOf("Headphone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Kulaklık", StringComparison.OrdinalIgnoreCase) >= 0) return "HEADPHONES";
+            if (name.IndexOf("Speaker", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Hoparlör", StringComparison.OrdinalIgnoreCase) >= 0) return "SPEAKER";
+            if (name.IndexOf("Realtek", StringComparison.OrdinalIgnoreCase) >= 0) return "ONBOARD AUDIO";
+            if (name.IndexOf("HDMI", StringComparison.OrdinalIgnoreCase) >= 0) return "HDMI";
+            return "AUDIO DEVICE";
+        }
+
+        // ── Status helper ────────────────────────────────
+        private void SetStatus(string text, Color dot)
+        {
+            lblStatusDot.ForeColor = dot;
+            lblStatusText.Text = text;
+            lblStatusText.ForeColor = dot == TEXT_SEC ? TEXT_SEC : TEXT_PRI;
+        }
+
+        private Button GetStartBtn() => btnStart.Tag as Button;
+        private Button GetStopBtn() => btnStop.Tag as Button;
+
+        // ══════════════════════════════════════════════════
+        // LOAD & INIT
+        // ══════════════════════════════════════════════════
+        private async void Form1_Load(object sender, EventArgs e)
+        {
+            // FormBorderStyle.None ile CenterScreen güvenilmez — manuel ortala
+            var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
+            this.Location = new Point(
+                screen.Left + (screen.Width - this.Width) / 2,
+                screen.Top + (screen.Height - this.Height) / 2);
+
+            if (!IsVirtualCableInstalled()) { ShowVirtualCableInstallPrompt(); return; }
+            await InitializeDevicesAsync();
+        }
+
+        private bool IsVirtualCableInstalled()
+        {
+            try
+            {
+                var tmp = new MMDeviceEnumerator();
+                var all = tmp.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
+                return all.Any(d =>
+                    d.FriendlyName.IndexOf("VB-Audio", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    d.FriendlyName.IndexOf("CABLE Input", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    d.FriendlyName.IndexOf("bluetoothTogether", StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+            catch { return false; }
+        }
+
+        private void ShowVirtualCableInstallPrompt()
+        {
+            pnlDeviceCards.Controls.Clear();
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+
+            var ico = new Label { Text = "⚡", Font = new Font("Segoe UI", 32F), ForeColor = ACCENT, AutoSize = true, Location = new Point(168, 8) };
+            var lblT = new Label { Text = "Sanal Ses Sürücüsü Gerekli", Font = new Font("Segoe UI", 11F, FontStyle.Bold), ForeColor = TEXT_PRI, AutoSize = false, Size = new Size(360, 24), Location = new Point(0, 68), TextAlign = ContentAlignment.MiddleCenter };
+            var lblI = new Label { Text = "VB-Audio Virtual Cable ücretsizdir.\nKurulumu 1 dakika alır. Kurduktan sonra yeniden başlatın.", Font = new Font("Segoe UI", 9F), ForeColor = TEXT_SEC, AutoSize = false, Size = new Size(360, 44), Location = new Point(0, 100), TextAlign = ContentAlignment.MiddleCenter };
+
+            var bDL = MakeButton("⬇   VB-Audio İndir  —  vb-audio.com", ACCENT, BG_DEEP, true);
+            bDL.Size = new Size(360, 44); bDL.Location = new Point(0, 158);
+            bDL.Click += (s, ev) => Process.Start(new ProcessStartInfo { FileName = "https://vb-audio.com/Cable/", UseShellExecute = true });
+
+            var bChk = MakeButton("✓   Kurdum, Kontrol Et", BG_SURFACE, TEXT_PRI, false);
+            bChk.Size = new Size(360, 40); bChk.Location = new Point(0, 210);
+            bChk.FlatAppearance.BorderColor = BORDER;
+            bChk.Click += async (s, ev) =>
+            {
+                if (IsVirtualCableInstalled()) { pnl.Visible = false; await InitializeDevicesAsync(); }
+                else { SetStatus("VB-Audio bulunamadı", DANGER); MessageBox.Show("VB-Audio hâlâ bulunamadı.", "Bulunamadı", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            };
+
+            pnl.Controls.Add(ico); pnl.Controls.Add(lblT); pnl.Controls.Add(lblI);
+            pnl.Controls.Add(bDL); pnl.Controls.Add(bChk);
+            pnlDeviceCards.Controls.Add(pnl);
+            pnlDeviceCards.Height = 270;
         }
 
         private async Task InitializeDevicesAsync()
         {
-            btnStart.Enabled = false;
-            btnStop.Enabled = false;
-            if (btnReset != null) btnReset.Enabled = false;
-            clbDevices.Enabled = false;
-            lblStatus.Text = "Durum: Sistem Hazırlanıyor, Bekleyin...";
-            lblStatus.ForeColor = Color.Orange;
+            GetStartBtn().Enabled = false;
+            btnReset.Enabled = false;
+            SetStatus("Sistem hazırlanıyor...", Color.FromArgb(255, 165, 0));
 
-            await Task.Run(() =>
-            {
-                enumerator = new MMDeviceEnumerator();
-                audioController = new CoreAudioController();
-            });
+            await Task.Run(() => { enumerator = new MMDeviceEnumerator(); audioController = new CoreAudioController(); });
 
             ScanDevices();
 
             if (virtualCableDevice == null)
             {
-                lblStatus.Text = "Durum: Hata (Sanal Kablo Yok)";
-                lblStatus.ForeColor = Color.Red;
+                SetStatus("Hata: Sanal kablo yok", DANGER);
                 ShowRestartDialog("Beklenmeyen bir hata oluştu.\nYeniden başlatın.");
                 return;
             }
 
-            btnStart.Enabled = true;
-            if (btnReset != null) btnReset.Enabled = true;
-            clbDevices.Enabled = true;
-            lblStatus.Text = "Durum: Bekleniyor...";
-            lblStatus.ForeColor = Color.White;
+            GetStartBtn().Enabled = true;
+            btnReset.Enabled = true;
+            SetStatus("Hazır", ACCENT2);
         }
 
-        /// <summary>
-        /// Cihaz listesini tarar ve UI'ı günceller. Reset butonundan da çağrılır.
-        /// </summary>
         private void ScanDevices()
         {
-            var allDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
-
-            virtualCableDevice = allDevices.FirstOrDefault(d =>
+            clbDevices.Items.Clear();
+            var all = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
+            virtualCableDevice = all.FirstOrDefault(d =>
                 d.FriendlyName.IndexOf("bluetoothTogether", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 d.FriendlyName.IndexOf("VB-Audio", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 d.FriendlyName.IndexOf("CABLE Input", StringComparison.OrdinalIgnoreCase) >= 0);
-
-            availableDevices = allDevices.Where(d => d.ID != virtualCableDevice?.ID).ToList();
-            clbDevices.Items.Clear();
-
-            for (int i = 0; i < availableDevices.Count; i++)
-            {
-                var dev = availableDevices[i];
-                string name = dev.FriendlyName;
-                clbDevices.Items.Add(name);
-
-                if (name.IndexOf("Kulaklık", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    name.IndexOf("Headphone", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    name.IndexOf("Bluetooth", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    name.IndexOf("Stereo", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    clbDevices.SetItemChecked(i, true);
-                }
-            }
+            availableDevices = all.Where(d => d.ID != virtualCableDevice?.ID).ToList();
+            RebuildDeviceCards();
         }
 
-        private void BtnReset_Click(object sender, EventArgs e)
+        // ══════════════════════════════════════════════════
+        // START
+        // ══════════════════════════════════════════════════
+        private void BtnStartNew_Click()
         {
-            bool wasRunning = (capture != null);
-
-            if (wasRunning)
-                StopAudioRouting();
-
-            lblStatus.Text = "Durum: Cihazlar Taranıyor...";
-            lblStatus.ForeColor = Color.Orange;
-
-            ScanDevices();
-
-            lblStatus.Text = $"Durum: {availableDevices.Count} cihaz bulundu.";
-            lblStatus.ForeColor = Color.White;
-
-            if (wasRunning)
-                MessageBox.Show("Ses yönlendirme durduruldu. Cihazlar yenilendi.\nSTART ile tekrar başlatabilirsiniz.", "Reset", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-
-        private void btnStart_Click(object sender, EventArgs e)
-        {
-            if (clbDevices.CheckedIndices.Count == 0)
-            {
-                MessageBox.Show("Lütfen en az bir cihaz seçin!", "Uyarı", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            if (clbDevices.CheckedIndices.Count == 0) { MessageBox.Show("En az bir cihaz seçin.", "Uyarı", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             try
             {
-                var currentDefault = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                var cur = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                if (cur != null && cur.ID != virtualCableDevice.ID) originalDeviceId = cur.ID;
 
-                if (virtualCableDevice == null) 
-                {
-                    ShowRestartDialog("Beklenmeyen bir hata oluştu.\nYeniden başlatın.");
-                    
-                    
-                }
-                
-                if (currentDefault != null && currentDefault.ID != virtualCableDevice.ID)
-                    originalDeviceId = currentDefault.ID;
-
-                var cableToSwitch = audioController.GetDevices().FirstOrDefault(d => d.RealId == virtualCableDevice.ID);
-                if (cableToSwitch != null)
-                {
-                    cableToSwitch.SetAsDefault();
-                    cableToSwitch.SetAsDefaultCommunications();
-                }
+                var cable = audioController.GetDevices().FirstOrDefault(d => d.RealId == virtualCableDevice.ID);
+                cable?.SetAsDefault(); cable?.SetAsDefaultCommunications();
 
                 capture = new WasapiLoopbackCapture(virtualCableDevice);
 
-                foreach (int index in clbDevices.CheckedIndices)
+                foreach (int idx in clbDevices.CheckedIndices)
                 {
-                    var device = availableDevices[index];
-                    var buffer = new BufferedWaveProvider(capture.WaveFormat) { DiscardOnBufferOverflow = true };
-                    var output = new WasapiOut(device, AudioClientShareMode.Shared, true, 20);
-
-                    output.Init(buffer);
-                    output.Play();
-
-                    buffers.Add(buffer);
-                    outputs.Add(output);
+                    var buf = new BufferedWaveProvider(capture.WaveFormat) { DiscardOnBufferOverflow = true };
+                    var out_ = new WasapiOut(availableDevices[idx], AudioClientShareMode.Shared, true, 20);
+                    out_.Init(buf); out_.Play();
+                    buffers.Add(buf); outputs.Add(out_);
                 }
 
-                capture.DataAvailable += (s, args) =>
-                {
-                    foreach (var buffer in buffers)
-                        buffer.AddSamples(args.Buffer, 0, args.BytesRecorded);
-                };
-
+                capture.DataAvailable += (s, a) => { foreach (var b in buffers) b.AddSamples(a.Buffer, 0, a.BytesRecorded); };
                 capture.StartRecording();
 
-                // Ses senkronizasyonunu başlat
-                lastVolume = -1f; // İlk tick'te mutlaka senkronize etsin
-                lastMute = false;
+                lastVolume = -1f; lastMute = false;
                 volumeSyncTimer.Start();
+                isRunning = true;
+                signalTimer.Start();
 
-                lblStatus.Text = $"Durum: {clbDevices.CheckedIndices.Count} Cihaza Yönlendiriliyor";
-                lblStatus.ForeColor = Color.Green;
+                SetStatus($"{clbDevices.CheckedIndices.Count} cihaza yönlendiriliyor", ACCENT2);
 
-                btnStart.Enabled = false;
-                clbDevices.Enabled = false;
-                if (btnReset != null) btnReset.Enabled = false;
-                btnStop.Enabled = true;
+                var sb = GetStartBtn(); var stb = GetStopBtn();
+                sb.Enabled = false; sb.BackColor = BG_SURFACE;
+                stb.Enabled = true; stb.BackColor = DANGER; stb.ForeColor = Color.White;
+                stb.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 40, 60);
+                btnReset.Enabled = false;
+                SetDeviceCardsEnabled(false);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Hata oluştu: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 StopAudioRouting();
             }
         }
 
-        /// <summary>
-        /// Her 100ms'de bir Windows ana ses seviyesini okur,
-        /// değişmişse tüm çıkış cihazlarına uygular.
-        /// </summary>
+        private void SetDeviceCardsEnabled(bool en)
+        {
+            foreach (Control c in pnlDeviceCards.Controls) c.Enabled = en;
+        }
+
+        // ══════════════════════════════════════════════════
+        // RESET
+        // ══════════════════════════════════════════════════
+        private void BtnReset_Click(object sender, EventArgs e)
+        {
+            bool wasRunning = (capture != null);
+            if (wasRunning) StopAudioRouting();
+            SetStatus("Cihazlar taranıyor...", Color.FromArgb(255, 165, 0));
+            ScanDevices();
+            SetStatus($"{availableDevices.Count} cihaz bulundu", ACCENT2);
+            if (wasRunning) MessageBox.Show("Ses durduruldu. START ile tekrar başlatın.", "Reset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        // ══════════════════════════════════════════════════
+        // VOLUME SYNC
+        // ══════════════════════════════════════════════════
         private void VolumeSyncTimer_Tick(object sender, EventArgs e)
         {
             try
             {
-                // Virtual Cable'ın ses seviyesini değil, orijinal cihazı dinliyoruz —
-                // ama asıl kaynak VB-Cable olduğundan sistemin master volume'ünü izliyoruz.
-                // En güvenilir yol: VB-Cable cihazının kendi volume'ünü oku.
                 if (virtualCableDevice == null) return;
-
-                float currentVolume = virtualCableDevice.AudioEndpointVolume.MasterVolumeLevelScalar;
-                bool currentMute = virtualCableDevice.AudioEndpointVolume.Mute;
-
-                // Değişiklik yoksa işlem yapma
-                if (Math.Abs(currentVolume - lastVolume) < 0.001f && currentMute == lastMute)
-                    return;
-
-                lastVolume = currentVolume;
-                lastMute = currentMute;
-
-                // Tüm aktif çıkış cihazlarına aynı ses seviyesini uygula
-                foreach (int index in clbDevices.CheckedIndices)
+                float vol = virtualCableDevice.AudioEndpointVolume.MasterVolumeLevelScalar;
+                bool mute = virtualCableDevice.AudioEndpointVolume.Mute;
+                if (Math.Abs(vol - lastVolume) < 0.001f && mute == lastMute) return;
+                lastVolume = vol; lastMute = mute;
+                foreach (int idx in clbDevices.CheckedIndices)
                 {
-                    try
-                    {
-                        var device = availableDevices[index];
-                        device.AudioEndpointVolume.MasterVolumeLevelScalar = currentVolume;
-                        device.AudioEndpointVolume.Mute = currentMute;
-                    }
-                    catch { /* Bir cihaz hata verse bile diğerleri devam etsin */ }
+                    try { availableDevices[idx].AudioEndpointVolume.MasterVolumeLevelScalar = vol; availableDevices[idx].AudioEndpointVolume.Mute = mute; } catch { }
                 }
             }
-            catch { /* Timer tick'i çökmemeli */ }
+            catch { }
         }
 
+        // ══════════════════════════════════════════════════
+        // STOP
+        // ══════════════════════════════════════════════════
+        private void StopAudioRouting()
+        {
+            volumeSyncTimer?.Stop(); signalTimer?.Stop();
+            isRunning = false; pnlSignal?.Invalidate();
+
+            if (capture != null) { capture.StopRecording(); capture.Dispose(); capture = null; }
+            foreach (var o in outputs) { try { o?.Stop(); o?.Dispose(); } catch { } }
+            outputs.Clear(); buffers.Clear();
+
+            if (!string.IsNullOrEmpty(originalDeviceId))
+            {
+                var orig = audioController.GetDevices().FirstOrDefault(d => d.RealId == originalDeviceId);
+                orig?.SetAsDefault(); orig?.SetAsDefaultCommunications();
+                originalDeviceId = "";
+            }
+
+            SetStatus("Hazır", ACCENT2);
+            var sb = GetStartBtn(); var stb = GetStopBtn();
+            if (sb != null) { sb.Enabled = true; sb.BackColor = ACCENT; }
+            if (stb != null) { stb.Enabled = false; stb.BackColor = BG_SURFACE; stb.ForeColor = TEXT_SEC; }
+            if (btnReset != null) btnReset.Enabled = true;
+            SetDeviceCardsEnabled(true);
+        }
+
+        // ══════════════════════════════════════════════════
+        // RESTART DIALOG
+        // ══════════════════════════════════════════════════
         private void ShowRestartDialog(string message)
         {
-            var dialog = new Form
-            {
-                Text = "HATA",
-                Size = new Size(340, 180),
-                StartPosition = FormStartPosition.CenterParent,
-                BackColor = Color.FromArgb(28, 28, 28),
-                ForeColor = Color.White,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false
-            };
+            var dlg = new Form { Text = "HATA", Size = new Size(340, 178), StartPosition = FormStartPosition.CenterParent, BackColor = BG_CARD, ForeColor = TEXT_PRI, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false };
+            int dm = 1; DwmSetWindowAttribute(dlg.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dm, sizeof(int));
+            int cc = ColorTranslator.ToWin32(BG_CARD); DwmSetWindowAttribute(dlg.Handle, DWMWA_CAPTION_COLOR, ref cc, sizeof(int));
 
-            // Başlık çubuğunu da karanlık yap
-            int darkMode = 1;
-            DwmSetWindowAttribute(dialog.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
-            int captionColor = ColorTranslator.ToWin32(Color.FromArgb(28, 28, 28));
-            DwmSetWindowAttribute(dialog.Handle, DWMWA_CAPTION_COLOR, ref captionColor, sizeof(int));
+            var lbl = new Label { Text = message, ForeColor = DANGER, Font = new Font("Segoe UI", 10F), AutoSize = false, Size = new Size(300, 58), Location = new Point(20, 18), TextAlign = ContentAlignment.MiddleCenter };
+            var btn = MakeButton("↺   Yeniden Başlat", ACCENT, BG_DEEP, true);
+            btn.Size = new Size(280, 42); btn.Location = new Point(24, 86);
+            btn.Click += (s, e) => { dlg.Close(); Application.Restart(); };
 
-            var lbl = new Label
-            {
-                Text = message,
-                ForeColor = Color.FromArgb(255, 80, 80),
-                Font = new Font("Segoe UI", 10F),
-                AutoSize = false,
-                Size = new Size(300, 60),
-                Location = new Point(20, 20),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-
-            var btnRestart = new Button
-            {
-                Text = "↺  Yeniden Başlat",
-                Size = new Size(280, 40),
-                Location = new Point(20, 90),
-                Cursor = Cursors.Hand,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
-                ForeColor = Color.Black,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
-            };
-            btnRestart.FlatAppearance.BorderSize = 0;
-            btnRestart.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 200, 200);
-            btnRestart.Click += (s, e) =>
-            {
-                dialog.Close();
-                // Mevcut exe'yi yeniden başlat
-                Application.Restart();
-                
-            };
-
-            dialog.Controls.Add(lbl);
-            dialog.Controls.Add(btnRestart);
-            dialog.ShowDialog(this);
+            dlg.Controls.Add(lbl); dlg.Controls.Add(btn);
+            dlg.ShowDialog(this);
         }
 
-        private void btnStop_Click(object sender, EventArgs e)
+        // ══════════════════════════════════════════════════
+        // FORM / TRAY EVENTS
+        // ══════════════════════════════════════════════════
+        private void Form1_FormClosing_Manual()
         {
-            StopAudioRouting();
+            if (!gercektenKapat)
+            {
+                this.Hide();
+                trayIcon.ShowBalloonTip(2000, "BluetoothTogether", "Arka planda çalışıyor.", ToolTipIcon.Info);
+            }
+            else
+            {
+                StopAudioRouting();
+                if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); }
+                Application.Exit();
+            }
         }
+
+        private void btnStop_Click(object sender, EventArgs e) => StopAudioRouting();
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (!gercektenKapat)
             {
-                e.Cancel = true;
-                this.Hide();
-                trayIcon.ShowBalloonTip(2000, "BluetoothTogether", "Uygulama arka planda çalışmaya devam ediyor.", ToolTipIcon.Info);
+                e.Cancel = true; this.Hide();
+                trayIcon.ShowBalloonTip(2000, "BluetoothTogether", "Arka planda çalışıyor.", ToolTipIcon.Info);
             }
             else
             {
                 StopAudioRouting();
-                if (trayIcon != null)
-                {
-                    trayIcon.Visible = false;
-                    trayIcon.Dispose();
-                }
+                if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); }
             }
         }
 
-        private void StopAudioRouting()
-        {
-            volumeSyncTimer?.Stop();
-
-            if (capture != null)
-            {
-                capture.StopRecording();
-                capture.Dispose();
-                capture = null;
-            }
-
-            foreach (var output in outputs)
-            {
-                try { output?.Stop(); output?.Dispose(); } catch { }
-            }
-
-            outputs.Clear();
-            buffers.Clear();
-
-            if (!string.IsNullOrEmpty(originalDeviceId))
-            {
-                var originalDeviceToSwitch = audioController.GetDevices().FirstOrDefault(d => d.RealId == originalDeviceId);
-                if (originalDeviceToSwitch != null)
-                {
-                    originalDeviceToSwitch.SetAsDefault();
-                    originalDeviceToSwitch.SetAsDefaultCommunications();
-                }
-                originalDeviceId = "";
-            }
-
-            lblStatus.Text = "Durum: Bekleniyor...";
-            lblStatus.ForeColor = Color.White;
-
-            if (btnStart != null) btnStart.Enabled = true;
-            if (clbDevices != null) clbDevices.Enabled = true;
-            if (btnStop != null) btnStop.Enabled = false;
-            if (btnReset != null) btnReset.Enabled = true;
-        }
-
-        private void TrayIcon_DoubleClick(object sender, EventArgs e)
-        {
-            this.Show();
-            this.WindowState = FormWindowState.Normal;
-        }
-
-        private void OnShowClick(object sender, EventArgs e)
-        {
-            this.Show();
-            this.WindowState = FormWindowState.Normal;
-        }
-
-        private void OnExitClick(object sender, EventArgs e)
-        {
-            gercektenKapat = true;
-            Application.Exit();
-        }
+        private void TrayIcon_DoubleClick(object sender, EventArgs e) { this.Show(); this.WindowState = FormWindowState.Normal; }
+        private void OnShowClick(object sender, EventArgs e) { this.Show(); this.WindowState = FormWindowState.Normal; }
+        private void OnExitClick(object sender, EventArgs e) { gercektenKapat = true; Application.Exit(); }
     }
 }

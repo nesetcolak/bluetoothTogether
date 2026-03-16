@@ -6,16 +6,24 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <ApplicationIcon>AppAndBrowser.ico</ApplicationIcon>
+    <ApplicationIcon>app_icon.ico</ApplicationIcon>
+    <PackageIcon>app_icon.ico</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="AppAndBrowser.ico" />
+    <Content Include="app_icon.ico" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="AudioSwitcher.AudioApi.CoreAudio" Version="3.0.3" />
     <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="app_icon.ico">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>

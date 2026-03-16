@@ -71,7 +71,6 @@
             btnStart.TabIndex = 10;
             btnStart.Text = "START";
             btnStart.UseVisualStyleBackColor = true;
-            btnStart.Click += btnStart_Click;
             // 
             // Form1
             // 
