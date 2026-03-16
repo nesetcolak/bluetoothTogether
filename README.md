@@ -10,7 +10,7 @@
 
 <br/>
 
-🇹🇷 [Türkçe](#türkçe) &nbsp;|&nbsp; 🇬🇧 [English](#english)
+🇹🇷 [Türkçe](#türkçe) &nbsp;|&nbsp; 🇺🇸 [English](#english)
 
 </div>
 
@@ -103,6 +103,15 @@ Evet, listeden istediğin kadar cihaz seçebilirsin.
 
 Pull request'ler açıktır. Büyük değişiklikler için önce bir issue açmanı öneririm.
 
+## Yapım Süreci
+
+Bu uygulama tek satır kod yazmadan, yapay zeka ile geliştirilmiştir.
+
+- 💬 Fikir, yönlendirme ve tasarım kararları: [Neşet Çolak](https://github.com/nesetcolak)
+- 🤖 Kod yazımı: [Google Gemini](https://gemini.google.com) & [Anthropic Claude](https://claude.ai)
+
+> Bir insan ne isteyeceğini bilirse, yapay zeka nasıl yapılacağını bilir.
+
 <br/>
 
 ---
@@ -194,10 +203,19 @@ Yes, you can select as many devices as you want from the list.
 
 Pull requests are welcome. For major changes, please open an issue first.
 
+## Development Process
+
+This application was built entirely with AI — not a single line of code was written by hand.
+
+- 💬 Idea, direction and design decisions: [Neşet Çolak](https://github.com/nesetcolak)
+- 🤖 Code generation: [Google Gemini](https://gemini.google.com) & [Anthropic Claude](https://claude.ai)
+
+> If a human knows what to build, AI knows how to build it.
+
 <br/>
 
 ---
 
 <div align="center">
-  <sub>Built for Windows · Powered by VB-Audio Virtual Cable</sub>
+  <sub>Built for Windows · Powered by VB-Audio Virtual Cable · Made with Google Gemini & Anthropic Claude</sub>
 </div>

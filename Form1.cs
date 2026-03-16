@@ -764,7 +764,7 @@ namespace bluetoothTogetheForms
                 StopAudioRouting();
                 if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); }
                 Application.Exit();
-            }
+            }//ssssss
         }
 
         private void btnStop_Click(object sender, EventArgs e) => StopAudioRouting();
