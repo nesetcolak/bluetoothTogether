@@ -281,9 +281,9 @@ namespace bluetoothTogetheForms
 
             if (virtualCableDevice == null)
             {
-                MessageBox.Show("Sanal Kablo bulunamadı!", "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = "Durum: Hata (Sanal Kablo Yok)";
                 lblStatus.ForeColor = Color.Red;
+                ShowRestartDialog("Beklenmeyen bir hata oluştu.\nYeniden başlatın.");
                 return;
             }
 
@@ -355,6 +355,14 @@ namespace bluetoothTogetheForms
             try
             {
                 var currentDefault = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+
+                if (virtualCableDevice == null) 
+                {
+                    ShowRestartDialog("Beklenmeyen bir hata oluştu.\nYeniden başlatın.");
+                    
+                    
+                }
+                
                 if (currentDefault != null && currentDefault.ID != virtualCableDevice.ID)
                     originalDeviceId = currentDefault.ID;
 
@@ -371,7 +379,7 @@ namespace bluetoothTogetheForms
                 {
                     var device = availableDevices[index];
                     var buffer = new BufferedWaveProvider(capture.WaveFormat) { DiscardOnBufferOverflow = true };
-                    var output = new WasapiOut(device, AudioClientShareMode.Shared, true, 10);
+                    var output = new WasapiOut(device, AudioClientShareMode.Shared, true, 20);
 
                     output.Init(buffer);
                     output.Play();
@@ -444,6 +452,63 @@ namespace bluetoothTogetheForms
                 }
             }
             catch { /* Timer tick'i çökmemeli */ }
+        }
+
+        private void ShowRestartDialog(string message)
+        {
+            var dialog = new Form
+            {
+                Text = "HATA",
+                Size = new Size(340, 180),
+                StartPosition = FormStartPosition.CenterParent,
+                BackColor = Color.FromArgb(28, 28, 28),
+                ForeColor = Color.White,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false
+            };
+
+            // Başlık çubuğunu da karanlık yap
+            int darkMode = 1;
+            DwmSetWindowAttribute(dialog.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+            int captionColor = ColorTranslator.ToWin32(Color.FromArgb(28, 28, 28));
+            DwmSetWindowAttribute(dialog.Handle, DWMWA_CAPTION_COLOR, ref captionColor, sizeof(int));
+
+            var lbl = new Label
+            {
+                Text = message,
+                ForeColor = Color.FromArgb(255, 80, 80),
+                Font = new Font("Segoe UI", 10F),
+                AutoSize = false,
+                Size = new Size(300, 60),
+                Location = new Point(20, 20),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            var btnRestart = new Button
+            {
+                Text = "↺  Yeniden Başlat",
+                Size = new Size(280, 40),
+                Location = new Point(20, 90),
+                Cursor = Cursors.Hand,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.White,
+                ForeColor = Color.Black,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+            btnRestart.FlatAppearance.BorderSize = 0;
+            btnRestart.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 200, 200);
+            btnRestart.Click += (s, e) =>
+            {
+                dialog.Close();
+                // Mevcut exe'yi yeniden başlat
+                Application.Restart();
+                
+            };
+
+            dialog.Controls.Add(lbl);
+            dialog.Controls.Add(btnRestart);
+            dialog.ShowDialog(this);
         }
 
         private void btnStop_Click(object sender, EventArgs e)
