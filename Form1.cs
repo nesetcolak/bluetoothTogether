@@ -391,16 +391,16 @@ namespace bluetoothTogetheForms
             // ── DELAY SATIRI ─────────────────────────────
             var lblDelay = new Label { Text = "Delay", Font = new Font("Segoe UI", 8F), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(14, 64) };
 
-            var slider = new TrackBar
+            // Custom dark slider (TrackBar yerine — tema uyumsuzluğunu önler)
+            int sliderValue = savedDelay;
+            bool sliderDragging = false;
+
+            var sliderTrack = new Panel
             {
-                Minimum = 0,
-                Maximum = 500,
-                Value = savedDelay,
-                TickStyle = TickStyle.None,
                 Size = new Size(card.Width - 130, 24),
-                Location = new Point(52, 60),
+                Location = new Point(52, 62),
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
-                BackColor = BG_CARD,
+                BackColor = Color.Transparent,
                 Cursor = Cursors.Hand
             };
 
@@ -415,13 +415,44 @@ namespace bluetoothTogetheForms
                 BackColor = Color.Transparent
             };
 
-            slider.ValueChanged += (s, e) =>
+            void UpdateSliderValue(int x)
             {
-                int v = slider.Value;
-                lblMs.Text = v == 0 ? "0 ms" : $"{v} ms";
-                lblMs.ForeColor = v == 0 ? TEXT_SEC : ACCENT;
-                SetDelay(name, v);
+                int w = sliderTrack.Width - 12;
+                sliderValue = Math.Max(0, Math.Min(500, (int)((float)x / w * 500)));
+                sliderTrack.Invalidate();
+                lblMs.Text = sliderValue == 0 ? "0 ms" : $"{sliderValue} ms";
+                lblMs.ForeColor = sliderValue == 0 ? TEXT_SEC : ACCENT;
+                SetDelay(name, sliderValue);
+            }
+
+            sliderTrack.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                int tw = sliderTrack.Width - 12;
+                int cy = sliderTrack.Height / 2;
+
+                // Track arka plan
+                using var trackBrush = new SolidBrush(Color.FromArgb(45, 45, 55));
+                g.FillRoundedRectangle(trackBrush, 4, cy - 2, tw, 4, 2);
+
+                // Dolu kısım
+                int fillW = (int)((float)sliderValue / 500 * tw);
+                if (fillW > 0)
+                {
+                    using var fillBrush = new SolidBrush(sliderValue == 0 ? TEXT_SEC : ACCENT);
+                    g.FillRoundedRectangle(fillBrush, 4, cy - 2, fillW, 4, 2);
+                }
+
+                // Thumb
+                int tx = 4 + fillW;
+                using var thumbBrush = new SolidBrush(sliderValue == 0 ? Color.FromArgb(80, 80, 95) : ACCENT);
+                g.FillEllipse(thumbBrush, tx - 5, cy - 5, 10, 10);
             };
+
+            sliderTrack.MouseDown += (s, e) => { sliderDragging = true; UpdateSliderValue(e.X); };
+            sliderTrack.MouseMove += (s, e) => { if (sliderDragging) UpdateSliderValue(e.X); };
+            sliderTrack.MouseUp += (s, e) => { sliderDragging = false; };
 
             // Toggle fonksiyonu
             void Toggle()
@@ -444,7 +475,7 @@ namespace bluetoothTogetheForms
             card.Controls.Add(lblN);
             card.Controls.Add(lblT);
             card.Controls.Add(lblDelay);
-            card.Controls.Add(slider);
+            card.Controls.Add(sliderTrack);
             card.Controls.Add(lblMs);
             return card;
         }
@@ -705,5 +736,22 @@ namespace bluetoothTogetheForms
         private void TrayIcon_DoubleClick(object sender, EventArgs e) { this.Show(); this.WindowState = FormWindowState.Normal; }
         private void OnShowClick(object sender, EventArgs e) { this.Show(); this.WindowState = FormWindowState.Normal; }
         private void OnExitClick(object sender, EventArgs e) { gercektenKapat = true; Application.Exit(); }
+    }
+
+    // Graphics extension — FillRoundedRectangle
+    internal static class GraphicsExtensions
+    {
+        public static void FillRoundedRectangle(this Graphics g, Brush brush, int x, int y, int w, int h, int r)
+        {
+            if (w <= 0 || h <= 0) return;
+            r = Math.Min(r, Math.Min(w, h) / 2);
+            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+            path.AddArc(x, y, r * 2, r * 2, 180, 90);
+            path.AddArc(x + w - r * 2, y, r * 2, r * 2, 270, 90);
+            path.AddArc(x + w - r * 2, y + h - r * 2, r * 2, r * 2, 0, 90);
+            path.AddArc(x, y + h - r * 2, r * 2, r * 2, 90, 90);
+            path.CloseFigure();
+            g.FillPath(brush, path);
+        }
     }
 }
