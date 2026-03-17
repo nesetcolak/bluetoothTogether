@@ -20,6 +20,7 @@ namespace bluetoothTogetheForms
         private WasapiLoopbackCapture capture;
         private List<WasapiOut> outputs = new List<WasapiOut>();
         private List<BufferedWaveProvider> buffers = new List<BufferedWaveProvider>();
+        private List<DelayBuffer> delayBuffers = new List<DelayBuffer>();
         private List<MMDevice> availableDevices = new List<MMDevice>();
 
         private MMDeviceEnumerator enumerator;
@@ -64,6 +65,12 @@ namespace bluetoothTogetheForms
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        // Görev yöneticisinden / ani kapanmadan kurtarma
+        [DllImport("kernel32.dll")]
+        private static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate handler, bool add);
+        private delegate bool ConsoleCtrlDelegate(int sig);
+        private ConsoleCtrlDelegate _ctrlHandler;
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
         private const int DWMWA_MICA_EFFECT = 1029;
         private const int DWMWA_CAPTION_COLOR = 35;
@@ -512,8 +519,31 @@ namespace bluetoothTogetheForms
                 screen.Left + (screen.Width - this.Width) / 2,
                 screen.Top + (screen.Height - this.Height) / 2);
 
+            // Tüm kapanma senaryolarında ses cihazını geri al
+            Application.ApplicationExit += (s, ev) => RestoreAudioDevice();
+            AppDomain.CurrentDomain.ProcessExit += (s, ev) => RestoreAudioDevice();
+            Microsoft.Win32.SystemEvents.SessionEnding += (s, ev) => RestoreAudioDevice();
+
+            // Görev yöneticisinden kill / ani kapanma için
+            _ctrlHandler = sig => { RestoreAudioDevice(); return false; };
+            SetConsoleCtrlHandler(_ctrlHandler, true);
+
             if (!IsVirtualCableInstalled()) { ShowVirtualCableInstallPrompt(); return; }
             await InitializeDevicesAsync();
+        }
+
+        private void RestoreAudioDevice()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(originalDeviceId)) return;
+                // audioController zaten hafızada — hızlıca geri dön
+                var orig = audioController?.GetDevices()
+                    .FirstOrDefault(d => d.RealId == originalDeviceId);
+                orig?.SetAsDefault();
+                orig?.SetAsDefaultCommunications();
+            }
+            catch { }
         }
 
         private bool IsVirtualCableInstalled()
@@ -601,20 +631,47 @@ namespace bluetoothTogetheForms
                     var device = availableDevices[idx];
                     int delayMs = GetDelay(device.FriendlyName);
                     var buf = new BufferedWaveProvider(capture.WaveFormat) { DiscardOnBufferOverflow = true };
-
-                    // Delay için buffer'a önceden boş veri ekle
-                    if (delayMs > 0)
-                    {
-                        int silenceSamples = (int)(capture.WaveFormat.SampleRate * (delayMs / 1000.0)) * capture.WaveFormat.BlockAlign;
-                        buf.AddSamples(new byte[silenceSamples], 0, silenceSamples);
-                    }
+                    var delay = new DelayBuffer(capture.WaveFormat, delayMs);
 
                     var out_ = new WasapiOut(device, AudioClientShareMode.Shared, true, 20);
                     out_.Init(buf); out_.Play();
-                    buffers.Add(buf); outputs.Add(out_);
+
+                    // Cihaz bağlantısı kesilince (batarya sesi, kopukluk vs.)
+                    // tüm DelayBuffer'ları sıfırla — senkron yeniden kurulsun
+                    int capturedIdx = buffers.Count;
+                    out_.PlaybackStopped += (ps, pe) =>
+                    {
+                        if (capture == null) return; // biz durdurduysak bir şey yapma
+                        foreach (var db in delayBuffers) db.Reset();
+                        foreach (var b in buffers) b.ClearBuffer();
+                        // Kısa bekle ve devam et
+                        System.Threading.Thread.Sleep(50);
+                        try { out_.Play(); } catch { }
+                    };
+
+                    buffers.Add(buf);
+                    outputs.Add(out_);
+                    delayBuffers.Add(delay);
                 }
 
-                capture.DataAvailable += (s, a) => { foreach (var b in buffers) b.AddSamples(a.Buffer, 0, a.BytesRecorded); };
+                capture.DataAvailable += (s, a) =>
+                {
+                    byte[] incoming = a.Buffer.Take(a.BytesRecorded).ToArray();
+                    for (int i = 0; i < buffers.Count; i++)
+                    {
+                        if (delayBuffers[i].HasDelay)
+                        {
+                            // Delay varsa pipeline'dan geçir — buffer dolu kalsın
+                            byte[] delayed = delayBuffers[i].Push(incoming);
+                            buffers[i].AddSamples(delayed, 0, delayed.Length);
+                        }
+                        else
+                        {
+                            // Delay yok — direkt geçir, buffer birikmesin
+                            buffers[i].AddSamples(incoming, 0, incoming.Length);
+                        }
+                    }
+                };
                 capture.StartRecording();
 
                 lastVolume = -1f; lastMute = false;
@@ -685,7 +742,7 @@ namespace bluetoothTogetheForms
             isRunning = false; pnlSignal?.Invalidate();
             if (capture != null) { capture.StopRecording(); capture.Dispose(); capture = null; }
             foreach (var o in outputs) { try { o?.Stop(); o?.Dispose(); } catch { } }
-            outputs.Clear(); buffers.Clear();
+            outputs.Clear(); buffers.Clear(); delayBuffers.Clear();
             if (!string.IsNullOrEmpty(originalDeviceId))
             {
                 var orig = audioController.GetDevices().FirstOrDefault(d => d.RealId == originalDeviceId);
@@ -736,6 +793,74 @@ namespace bluetoothTogetheForms
         private void TrayIcon_DoubleClick(object sender, EventArgs e) { this.Show(); this.WindowState = FormWindowState.Normal; }
         private void OnShowClick(object sender, EventArgs e) { this.Show(); this.WindowState = FormWindowState.Normal; }
         private void OnExitClick(object sender, EventArgs e) { gercektenKapat = true; Application.Exit(); }
+    }
+
+    // ══════════════════════════════════════════════════
+    // DELAY BUFFER — gelen sesi X ms geciktirerek çıkışa verir
+    // Bluetooth'un iç buffer durumundan bağımsız çalışır
+    // ══════════════════════════════════════════════════
+    internal class DelayBuffer
+    {
+        private readonly LinkedList<byte[]> _chunks = new LinkedList<byte[]>();
+        private int _bufferedBytes = 0;
+        private readonly int _delaySamples;
+        private bool _primed = false;
+
+        public bool HasDelay => _delaySamples > 0;
+
+        public DelayBuffer(WaveFormat format, int delayMs)
+        {
+            _delaySamples = (int)(format.SampleRate * (delayMs / 1000.0)) * format.BlockAlign;
+        }
+
+        public byte[] Push(byte[] data)
+        {
+            if (_delaySamples == 0)
+                return data;
+
+            _chunks.AddLast(data);
+            _bufferedBytes += data.Length;
+
+            if (!_primed)
+            {
+                if (_bufferedBytes < _delaySamples)
+                    return new byte[data.Length];
+                _primed = true;
+            }
+
+            var result = new List<byte>(data.Length);
+            int needed = data.Length;
+
+            while (needed > 0 && _chunks.Count > 0)
+            {
+                var chunk = _chunks.First.Value;
+                if (chunk.Length <= needed)
+                {
+                    result.AddRange(chunk);
+                    _bufferedBytes -= chunk.Length;
+                    needed -= chunk.Length;
+                    _chunks.RemoveFirst();
+                }
+                else
+                {
+                    result.AddRange(new ArraySegment<byte>(chunk, 0, needed));
+                    var remaining = new byte[chunk.Length - needed];
+                    Array.Copy(chunk, needed, remaining, 0, remaining.Length);
+                    _chunks.RemoveFirst();
+                    _chunks.AddFirst(remaining);
+                    _bufferedBytes -= needed;
+                    needed = 0;
+                }
+            }
+            return result.ToArray();
+        }
+
+        public void Reset()
+        {
+            _chunks.Clear();
+            _bufferedBytes = 0;
+            _primed = false;
+        }
     }
 
     // Graphics extension — FillRoundedRectangle
