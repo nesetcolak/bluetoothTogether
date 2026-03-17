@@ -10,6 +10,8 @@ using NAudio.CoreAudioApi;
 using AudioSwitcher.AudioApi.CoreAudio;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.Text.Json;
+using System.IO;
 
 namespace bluetoothTogetheForms
 {
@@ -44,6 +46,12 @@ namespace bluetoothTogetheForms
         private int signalFrame = 0;
         private bool isRunning = false;
 
+        // Delay ayarları: cihaz adı → ms
+        private Dictionary<string, int> deviceDelays = new Dictionary<string, int>();
+        private string settingsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BluetoothTogether", "settings.json");
+
         private readonly Color BG_DEEP = Color.FromArgb(13, 13, 15);
         private readonly Color BG_CARD = Color.FromArgb(22, 22, 26);
         private readonly Color BG_SURFACE = Color.FromArgb(30, 30, 36);
@@ -70,21 +78,61 @@ namespace bluetoothTogetheForms
         public Form1()
         {
             InitializeComponent();
-
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.Manual;
 
             int darkMode = 1;
             DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
-
             int noBackdrop = DWMSBT_NONE;
             DwmSetWindowAttribute(this.Handle, DWMWA_SYSTEMBACKDROP_TYPE, ref noBackdrop, sizeof(int));
             int micaOff = 0;
             DwmSetWindowAttribute(this.Handle, DWMWA_MICA_EFFECT, ref micaOff, sizeof(int));
 
+            LoadSettings();
             BuildUI();
         }
 
+        // ══════════════════════════════════════════════════
+        // SETTINGS
+        // ══════════════════════════════════════════════════
+        private void LoadSettings()
+        {
+            try
+            {
+                if (File.Exists(settingsPath))
+                {
+                    string json = File.ReadAllText(settingsPath);
+                    deviceDelays = JsonSerializer.Deserialize<Dictionary<string, int>>(json)
+                                   ?? new Dictionary<string, int>();
+                }
+            }
+            catch { deviceDelays = new Dictionary<string, int>(); }
+        }
+
+        private void SaveSettings()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(settingsPath));
+                File.WriteAllText(settingsPath, JsonSerializer.Serialize(deviceDelays));
+            }
+            catch { }
+        }
+
+        private int GetDelay(string deviceName)
+        {
+            return deviceDelays.TryGetValue(deviceName, out int d) ? d : 0;
+        }
+
+        private void SetDelay(string deviceName, int ms)
+        {
+            deviceDelays[deviceName] = ms;
+            SaveSettings();
+        }
+
+        // ══════════════════════════════════════════════════
+        // DRAG
+        // ══════════════════════════════════════════════════
         private void TitleBar_MouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)
@@ -103,10 +151,7 @@ namespace bluetoothTogetheForms
                 this.Location = new Point(cur.X - _dragStart.X, cur.Y - _dragStart.Y);
             }
         }
-        private void TitleBar_MouseUp(object sender, MouseEventArgs e)
-        {
-            _dragging = false;
-        }
+        private void TitleBar_MouseUp(object sender, MouseEventArgs e) => _dragging = false;
 
         // ══════════════════════════════════════════════════
         // UI BUILDER
@@ -134,70 +179,22 @@ namespace bluetoothTogetheForms
                 e.Graphics.DrawLine(pen, 0, customTitleBar.Height - 1, customTitleBar.Width, customTitleBar.Height - 1);
             };
 
-            var picIcon = new PictureBox
-            {
-                Size = new Size(16, 16),
-                Location = new Point(10, 8),
-                BackColor = Color.Transparent,
-                SizeMode = PictureBoxSizeMode.StretchImage
-            };
-            try
-            {
-                var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-                if (exeIcon != null) picIcon.Image = exeIcon.ToBitmap();
-            }
-            catch
-            {
-                try
-                {
-                    string icoPath = System.IO.Path.Combine(
-                        System.IO.Path.GetDirectoryName(Application.ExecutablePath), "app_icon.ico");
-                    if (System.IO.File.Exists(icoPath))
-                        picIcon.Image = new Icon(icoPath, 16, 16).ToBitmap();
-                }
-                catch { }
-            }
+            var picIcon = new PictureBox { Size = new Size(16, 16), Location = new Point(10, 8), BackColor = Color.Transparent, SizeMode = PictureBoxSizeMode.StretchImage };
+            try { var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (exeIcon != null) picIcon.Image = exeIcon.ToBitmap(); }
+            catch { try { string p = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "app_icon.ico"); if (File.Exists(p)) picIcon.Image = new Icon(p, 16, 16).ToBitmap(); } catch { } }
 
-            var lblTitleBar = new Label
-            {
-                Text = "BluetoothTogether",
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = Color.FromArgb(160, 160, 170),
-                AutoSize = true,
-                Location = new Point(32, 8),
-                BackColor = Color.Transparent
-            };
+            var lblTitleBar = new Label { Text = "BluetoothTogether", Font = new Font("Segoe UI", 9F), ForeColor = Color.FromArgb(160, 160, 170), AutoSize = true, Location = new Point(32, 8), BackColor = Color.Transparent };
 
             var pnlWinBtns = new Panel { Dock = DockStyle.Right, Width = 92, BackColor = Color.Transparent };
 
-            var btnMinimize = new Button
-            {
-                Text = "─",
-                Size = new Size(46, 32),
-                Location = new Point(0, 0),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.Transparent,
-                ForeColor = Color.FromArgb(160, 160, 170),
-                Font = new Font("Segoe UI", 10F),
-                Cursor = Cursors.Hand
-            };
+            var btnMinimize = new Button { Text = "─", Size = new Size(46, 32), Location = new Point(0, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.Transparent, ForeColor = Color.FromArgb(160, 160, 170), Font = new Font("Segoe UI", 10F), Cursor = Cursors.Hand };
             btnMinimize.FlatAppearance.BorderSize = 0;
             btnMinimize.FlatAppearance.MouseOverBackColor = Color.FromArgb(50, 50, 58);
             btnMinimize.MouseEnter += (s, e) => btnMinimize.ForeColor = Color.White;
             btnMinimize.MouseLeave += (s, e) => btnMinimize.ForeColor = Color.FromArgb(160, 160, 170);
             btnMinimize.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
 
-            var btnClose = new Button
-            {
-                Text = "✕",
-                Size = new Size(46, 32),
-                Location = new Point(46, 0),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.Transparent,
-                ForeColor = Color.FromArgb(160, 160, 170),
-                Font = new Font("Segoe UI", 10F),
-                Cursor = Cursors.Hand
-            };
+            var btnClose = new Button { Text = "✕", Size = new Size(46, 32), Location = new Point(46, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.Transparent, ForeColor = Color.FromArgb(160, 160, 170), Font = new Font("Segoe UI", 10F), Cursor = Cursors.Hand };
             btnClose.FlatAppearance.BorderSize = 0;
             btnClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 43, 28);
             btnClose.MouseEnter += (s, e) => btnClose.ForeColor = Color.White;
@@ -206,11 +203,9 @@ namespace bluetoothTogetheForms
 
             pnlWinBtns.Controls.Add(btnMinimize);
             pnlWinBtns.Controls.Add(btnClose);
-
             customTitleBar.Controls.Add(pnlWinBtns);
             customTitleBar.Controls.Add(picIcon);
             customTitleBar.Controls.Add(lblTitleBar);
-
             customTitleBar.MouseDown += TitleBar_MouseDown;
             customTitleBar.MouseMove += TitleBar_MouseMove;
             customTitleBar.MouseUp += TitleBar_MouseUp;
@@ -230,41 +225,19 @@ namespace bluetoothTogetheForms
                 using var gb = new LinearGradientBrush(new Point(0, 10), new Point(0, 66), Color.FromArgb(0, ACCENT), ACCENT);
                 e.Graphics.FillRectangle(gb, 0, 10, 3, 56);
             };
-
-            var lblTitle = new Label
-            {
-                Text = "BLUETOOTH TOGETHER",
-                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
-                ForeColor = TEXT_PRI,
-                AutoSize = true,
-                Location = new Point(22, 14)
-            };
-            var lblSub = new Label
-            {
-                Text = "Multi-device audio router",
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = TEXT_SEC,
-                AutoSize = true,
-                Location = new Point(23, 40)
-            };
-
+            var lblTitle = new Label { Text = "BLUETOOTH TOGETHER", Font = new Font("Segoe UI", 13F, FontStyle.Bold), ForeColor = TEXT_PRI, AutoSize = true, Location = new Point(22, 14) };
+            var lblSub = new Label { Text = "Multi-device audio router", Font = new Font("Segoe UI", 9F), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(23, 40) };
             pnlSignal = new Panel { Size = new Size(52, 28), BackColor = Color.Transparent, Location = new Point(348, 26) };
             pnlSignal.Paint += PnlSignal_Paint;
             signalTimer = new System.Windows.Forms.Timer { Interval = 110 };
             signalTimer.Tick += (s, e) => { signalFrame = (signalFrame + 1) % 8; pnlSignal.Invalidate(); };
-
             pnlHeader.Controls.Add(lblTitle);
             pnlHeader.Controls.Add(lblSub);
             pnlHeader.Controls.Add(pnlSignal);
 
             // ── STATUS BAR ───────────────────────────────
             pnlStatusBar = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = BG_SURFACE };
-            pnlStatusBar.Paint += (s, e) =>
-            {
-                using var pen = new Pen(BORDER, 1);
-                e.Graphics.DrawLine(pen, 0, pnlStatusBar.Height - 1, pnlStatusBar.Width, pnlStatusBar.Height - 1);
-            };
-
+            pnlStatusBar.Paint += (s, e) => { using var pen = new Pen(BORDER, 1); e.Graphics.DrawLine(pen, 0, pnlStatusBar.Height - 1, pnlStatusBar.Width, pnlStatusBar.Height - 1); };
             lblStatusDot = new Label { Text = "●", Font = new Font("Segoe UI", 9F), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(22, 10) };
             lblStatusText = new Label { Text = "Initializing...", Font = new Font("Segoe UI", 9F), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(40, 10) };
             pnlStatusBar.Controls.Add(lblStatusDot);
@@ -283,19 +256,16 @@ namespace bluetoothTogetheForms
             pnlBtns.Paint += (s, e) => { using var pen = new Pen(BORDER, 1); e.Graphics.DrawLine(pen, 0, 0, pnlBtns.Width, 0); };
 
             var btnStartNew = MakeButton("▶  START", ACCENT, BG_DEEP, true);
-            btnStartNew.Size = new Size(156, 44);
-            btnStartNew.Location = new Point(14, 16);
+            btnStartNew.Size = new Size(156, 44); btnStartNew.Location = new Point(14, 16);
             btnStartNew.Click += (s, e) => BtnStartNew_Click();
 
             var btnStopNew = MakeButton("■  STOP", BG_SURFACE, TEXT_SEC, false);
-            btnStopNew.Size = new Size(118, 44);
-            btnStopNew.Location = new Point(178, 16);
+            btnStopNew.Size = new Size(118, 44); btnStopNew.Location = new Point(178, 16);
             btnStopNew.Enabled = false;
             btnStopNew.Click += (s, e) => StopAudioRouting();
 
             btnReset = MakeButton("↺", BG_SURFACE, TEXT_SEC, false);
-            btnReset.Size = new Size(44, 44);
-            btnReset.Location = new Point(304, 16);
+            btnReset.Size = new Size(44, 44); btnReset.Location = new Point(304, 16);
             btnReset.Font = new Font("Segoe UI", 14F);
             btnReset.Click += BtnReset_Click;
 
@@ -341,32 +311,22 @@ namespace bluetoothTogetheForms
                 int h = isRunning ? heights[(signalFrame + i) % heights.Length] : 4;
                 var color = isRunning ? Color.FromArgb(Math.Min(255, 80 + i * 30), ACCENT2) : Color.FromArgb(40, TEXT_SEC);
                 using var brush = new SolidBrush(color);
-                int x = i * (barW + gap);
-                int y = (24 - h) / 2;
-                e.Graphics.FillRectangle(brush, x, y, barW, h);
+                e.Graphics.FillRectangle(brush, i * (barW + gap), (24 - h) / 2, barW, h);
             }
         }
 
         private Button MakeButton(string text, Color back, Color fore, bool isAccent)
         {
-            var btn = new Button
-            {
-                Text = text,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = back,
-                ForeColor = fore,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
-                Cursor = Cursors.Hand,
-                TextAlign = ContentAlignment.MiddleCenter
-            };
+            var btn = new Button { Text = text, FlatStyle = FlatStyle.Flat, BackColor = back, ForeColor = fore, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), Cursor = Cursors.Hand, TextAlign = ContentAlignment.MiddleCenter };
             btn.FlatAppearance.BorderSize = isAccent ? 0 : 1;
             btn.FlatAppearance.BorderColor = BORDER;
-            btn.FlatAppearance.MouseOverBackColor = isAccent
-                ? Color.FromArgb(0, 190, 230)
-                : Color.FromArgb(40, 40, 50);
+            btn.FlatAppearance.MouseOverBackColor = isAccent ? Color.FromArgb(0, 190, 230) : Color.FromArgb(40, 40, 50);
             return btn;
         }
 
+        // ══════════════════════════════════════════════════
+        // DEVICE CARDS
+        // ══════════════════════════════════════════════════
         private void RebuildDeviceCards()
         {
             pnlDeviceCards.Controls.Clear();
@@ -399,7 +359,10 @@ namespace bluetoothTogetheForms
 
         private Panel BuildDeviceCard(string name, bool isChecked, int index)
         {
-            var card = new Panel { Height = 52, BackColor = BG_CARD, Cursor = Cursors.Hand, Tag = isChecked };
+            int savedDelay = GetDelay(name);
+
+            // Kart yüksekliği: normal 52 + delay satırı 36 = 88
+            var card = new Panel { Height = 88, BackColor = BG_CARD, Cursor = Cursors.Default, Tag = isChecked };
 
             card.Paint += (s, e) =>
             {
@@ -412,44 +375,55 @@ namespace bluetoothTogetheForms
                     using var gb = new LinearGradientBrush(new Point(0, 8), new Point(0, card.Height - 8), Color.FromArgb(0, ACCENT), ACCENT);
                     e.Graphics.FillRectangle(gb, 0, 8, 3, card.Height - 16);
                 }
+                // Ayırıcı çizgi (üst kısım / delay kısım)
+                using var divPen = new Pen(Color.FromArgb(35, 35, 45), 1);
+                e.Graphics.DrawLine(divPen, 14, 56, card.Width - 14, 56);
             };
 
-            var chk = new Label
-            {
-                Size = new Size(22, 22),
-                Location = new Point(14, 15),
-                BackColor = Color.Transparent,
-                ForeColor = isChecked ? ACCENT : TEXT_SEC,
-                Text = isChecked ? "◉" : "○",
-                Font = new Font("Segoe UI", 12F),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Cursor = Cursors.Hand
-            };
+            // Checkbox
+            var chk = new Label { Size = new Size(22, 22), Location = new Point(14, 15), BackColor = Color.Transparent, ForeColor = isChecked ? ACCENT : TEXT_SEC, Text = isChecked ? "◉" : "○", Font = new Font("Segoe UI", 12F), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
 
+            // Cihaz adı
             string shortName = name.Length > 44 ? name.Substring(0, 42) + "…" : name;
-            var lblN = new Label
+            var lblN = new Label { Text = shortName, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), ForeColor = isChecked ? TEXT_PRI : TEXT_SEC, AutoSize = false, Size = new Size(card.Width - 68, 20), Location = new Point(44, 8), BackColor = Color.Transparent, Cursor = Cursors.Hand, Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top };
+            var lblT = new Label { Text = GetDeviceTypeLabel(name), Font = new Font("Segoe UI", 7.5F), ForeColor = Color.FromArgb(75, 75, 90), AutoSize = true, Location = new Point(44, 28), BackColor = Color.Transparent, Cursor = Cursors.Hand };
+
+            // ── DELAY SATIRI ─────────────────────────────
+            var lblDelay = new Label { Text = "Delay", Font = new Font("Segoe UI", 8F), ForeColor = TEXT_SEC, AutoSize = true, Location = new Point(14, 64) };
+
+            var slider = new TrackBar
             {
-                Text = shortName,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
-                ForeColor = isChecked ? TEXT_PRI : TEXT_SEC,
-                AutoSize = false,
-                Size = new Size(card.Width - 68, 20),
-                Location = new Point(44, 8),
-                BackColor = Color.Transparent,
-                Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
-            };
-            var lblT = new Label
-            {
-                Text = GetDeviceTypeLabel(name),
-                Font = new Font("Segoe UI", 7.5F),
-                ForeColor = Color.FromArgb(75, 75, 90),
-                AutoSize = true,
-                Location = new Point(44, 28),
-                BackColor = Color.Transparent,
+                Minimum = 0,
+                Maximum = 500,
+                Value = savedDelay,
+                TickStyle = TickStyle.None,
+                Size = new Size(card.Width - 130, 24),
+                Location = new Point(52, 60),
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+                BackColor = BG_CARD,
                 Cursor = Cursors.Hand
             };
 
+            var lblMs = new Label
+            {
+                Text = savedDelay == 0 ? "0 ms" : $"{savedDelay} ms",
+                Font = new Font("Segoe UI", 8F, FontStyle.Bold),
+                ForeColor = savedDelay == 0 ? TEXT_SEC : ACCENT,
+                AutoSize = true,
+                Location = new Point(card.Width - 72, 64),
+                Anchor = AnchorStyles.Right | AnchorStyles.Top,
+                BackColor = Color.Transparent
+            };
+
+            slider.ValueChanged += (s, e) =>
+            {
+                int v = slider.Value;
+                lblMs.Text = v == 0 ? "0 ms" : $"{v} ms";
+                lblMs.ForeColor = v == 0 ? TEXT_SEC : ACCENT;
+                SetDelay(name, v);
+            };
+
+            // Toggle fonksiyonu
             void Toggle()
             {
                 bool ns = !(bool)card.Tag;
@@ -461,7 +435,7 @@ namespace bluetoothTogetheForms
                 if (index < clbDevices.Items.Count) clbDevices.SetItemChecked(index, ns);
             }
 
-            card.Click += (s, e) => Toggle();
+            card.Click += (s, e) => { var pt = card.PointToClient(Control.MousePosition); if (pt.Y < 56) Toggle(); };
             chk.Click += (s, e) => Toggle();
             lblN.Click += (s, e) => Toggle();
             lblT.Click += (s, e) => Toggle();
@@ -469,6 +443,9 @@ namespace bluetoothTogetheForms
             card.Controls.Add(chk);
             card.Controls.Add(lblN);
             card.Controls.Add(lblT);
+            card.Controls.Add(lblDelay);
+            card.Controls.Add(slider);
+            card.Controls.Add(lblMs);
             return card;
         }
 
@@ -526,28 +503,20 @@ namespace bluetoothTogetheForms
         {
             pnlDeviceCards.Controls.Clear();
             var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
-
             var ico = new Label { Text = "⚡", Font = new Font("Segoe UI", 32F), ForeColor = ACCENT, AutoSize = true, Location = new Point(168, 8) };
             var lblT = new Label { Text = "Virtual Audio Driver Required", Font = new Font("Segoe UI", 11F, FontStyle.Bold), ForeColor = TEXT_PRI, AutoSize = false, Size = new Size(360, 24), Location = new Point(0, 68), TextAlign = ContentAlignment.MiddleCenter };
             var lblI = new Label { Text = "VB-Audio Virtual Cable is free.\nInstallation takes 1 minute. Restart the app after installing.", Font = new Font("Segoe UI", 9F), ForeColor = TEXT_SEC, AutoSize = false, Size = new Size(360, 44), Location = new Point(0, 100), TextAlign = ContentAlignment.MiddleCenter };
-
             var bDL = MakeButton("⬇   Download VB-Audio  —  vb-audio.com", ACCENT, BG_DEEP, true);
             bDL.Size = new Size(360, 44); bDL.Location = new Point(0, 158);
             bDL.Click += (s, ev) => Process.Start(new ProcessStartInfo { FileName = "https://vb-audio.com/Cable/", UseShellExecute = true });
-
             var bChk = MakeButton("✓   Installed, Check Again", BG_SURFACE, TEXT_PRI, false);
             bChk.Size = new Size(360, 40); bChk.Location = new Point(0, 210);
             bChk.FlatAppearance.BorderColor = BORDER;
             bChk.Click += async (s, ev) =>
             {
                 if (IsVirtualCableInstalled()) { pnl.Visible = false; await InitializeDevicesAsync(); }
-                else
-                {
-                    SetStatus("VB-Audio not found", DANGER);
-                    MessageBox.Show("VB-Audio is still not found.", "Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
+                else { SetStatus("VB-Audio not found", DANGER); MessageBox.Show("VB-Audio is still not found.", "Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             };
-
             pnl.Controls.Add(ico); pnl.Controls.Add(lblT); pnl.Controls.Add(lblI);
             pnl.Controls.Add(bDL); pnl.Controls.Add(bChk);
             pnlDeviceCards.Controls.Add(pnl);
@@ -559,18 +528,9 @@ namespace bluetoothTogetheForms
             GetStartBtn().Enabled = false;
             btnReset.Enabled = false;
             SetStatus("Initializing system...", Color.FromArgb(255, 165, 0));
-
             await Task.Run(() => { enumerator = new MMDeviceEnumerator(); audioController = new CoreAudioController(); });
-
             ScanDevices();
-
-            if (virtualCableDevice == null)
-            {
-                SetStatus("Error: Virtual cable not found", DANGER);
-                ShowRestartDialog("An unexpected error occurred.\nPlease restart the application.");
-                return;
-            }
-
+            if (virtualCableDevice == null) { SetStatus("Error: Virtual cable not found", DANGER); ShowRestartDialog("An unexpected error occurred.\nPlease restart the application."); return; }
             GetStartBtn().Enabled = true;
             btnReset.Enabled = true;
             SetStatus("Ready", ACCENT2);
@@ -593,11 +553,7 @@ namespace bluetoothTogetheForms
         // ══════════════════════════════════════════════════
         private void BtnStartNew_Click()
         {
-            if (clbDevices.CheckedIndices.Count == 0)
-            {
-                MessageBox.Show("Please select at least one device.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            if (clbDevices.CheckedIndices.Count == 0) { MessageBox.Show("Please select at least one device.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             try
             {
@@ -611,8 +567,18 @@ namespace bluetoothTogetheForms
 
                 foreach (int idx in clbDevices.CheckedIndices)
                 {
+                    var device = availableDevices[idx];
+                    int delayMs = GetDelay(device.FriendlyName);
                     var buf = new BufferedWaveProvider(capture.WaveFormat) { DiscardOnBufferOverflow = true };
-                    var out_ = new WasapiOut(availableDevices[idx], AudioClientShareMode.Shared, true, 20);
+
+                    // Delay için buffer'a önceden boş veri ekle
+                    if (delayMs > 0)
+                    {
+                        int silenceSamples = (int)(capture.WaveFormat.SampleRate * (delayMs / 1000.0)) * capture.WaveFormat.BlockAlign;
+                        buf.AddSamples(new byte[silenceSamples], 0, silenceSamples);
+                    }
+
+                    var out_ = new WasapiOut(device, AudioClientShareMode.Shared, true, 20);
                     out_.Init(buf); out_.Play();
                     buffers.Add(buf); outputs.Add(out_);
                 }
@@ -656,8 +622,7 @@ namespace bluetoothTogetheForms
             SetStatus("Scanning devices...", Color.FromArgb(255, 165, 0));
             ScanDevices();
             SetStatus($"{availableDevices.Count} device(s) found", ACCENT2);
-            if (wasRunning)
-                MessageBox.Show("Audio stopped. Press START to begin again.", "Reset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (wasRunning) MessageBox.Show("Audio stopped. Press START to begin again.", "Reset", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         // ══════════════════════════════════════════════════
@@ -674,12 +639,7 @@ namespace bluetoothTogetheForms
                 lastVolume = vol; lastMute = mute;
                 foreach (int idx in clbDevices.CheckedIndices)
                 {
-                    try
-                    {
-                        availableDevices[idx].AudioEndpointVolume.MasterVolumeLevelScalar = vol;
-                        availableDevices[idx].AudioEndpointVolume.Mute = mute;
-                    }
-                    catch { }
+                    try { availableDevices[idx].AudioEndpointVolume.MasterVolumeLevelScalar = vol; availableDevices[idx].AudioEndpointVolume.Mute = mute; } catch { }
                 }
             }
             catch { }
@@ -692,18 +652,15 @@ namespace bluetoothTogetheForms
         {
             volumeSyncTimer?.Stop(); signalTimer?.Stop();
             isRunning = false; pnlSignal?.Invalidate();
-
             if (capture != null) { capture.StopRecording(); capture.Dispose(); capture = null; }
             foreach (var o in outputs) { try { o?.Stop(); o?.Dispose(); } catch { } }
             outputs.Clear(); buffers.Clear();
-
             if (!string.IsNullOrEmpty(originalDeviceId))
             {
                 var orig = audioController.GetDevices().FirstOrDefault(d => d.RealId == originalDeviceId);
                 orig?.SetAsDefault(); orig?.SetAsDefaultCommunications();
                 originalDeviceId = "";
             }
-
             SetStatus("Ready", ACCENT2);
             var sb = GetStartBtn(); var stb = GetStopBtn();
             if (sb != null) { sb.Enabled = true; sb.BackColor = ACCENT; }
@@ -717,25 +674,13 @@ namespace bluetoothTogetheForms
         // ══════════════════════════════════════════════════
         private void ShowRestartDialog(string message)
         {
-            var dlg = new Form
-            {
-                Text = "Error",
-                Size = new Size(340, 178),
-                StartPosition = FormStartPosition.CenterParent,
-                BackColor = BG_CARD,
-                ForeColor = TEXT_PRI,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false
-            };
+            var dlg = new Form { Text = "Error", Size = new Size(340, 178), StartPosition = FormStartPosition.CenterParent, BackColor = BG_CARD, ForeColor = TEXT_PRI, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false };
             int dm = 1; DwmSetWindowAttribute(dlg.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dm, sizeof(int));
             int cc = ColorTranslator.ToWin32(BG_CARD); DwmSetWindowAttribute(dlg.Handle, DWMWA_CAPTION_COLOR, ref cc, sizeof(int));
-
             var lbl = new Label { Text = message, ForeColor = DANGER, Font = new Font("Segoe UI", 10F), AutoSize = false, Size = new Size(300, 58), Location = new Point(20, 18), TextAlign = ContentAlignment.MiddleCenter };
             var btn = MakeButton("↺   Restart", ACCENT, BG_DEEP, true);
             btn.Size = new Size(280, 42); btn.Location = new Point(24, 86);
             btn.Click += (s, e) => { dlg.Close(); Application.Restart(); };
-
             dlg.Controls.Add(lbl); dlg.Controls.Add(btn);
             dlg.ShowDialog(this);
         }
@@ -745,33 +690,16 @@ namespace bluetoothTogetheForms
         // ══════════════════════════════════════════════════
         private void Form1_FormClosing_Manual()
         {
-            if (!gercektenKapat)
-            {
-                this.Hide();
-                trayIcon.ShowBalloonTip(2000, "BluetoothTogether", "Running in the background.", ToolTipIcon.Info);
-            }
-            else
-            {
-                StopAudioRouting();
-                if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); }
-                Application.Exit();
-            }
+            if (!gercektenKapat) { this.Hide(); trayIcon.ShowBalloonTip(2000, "BluetoothTogether", "Running in the background.", ToolTipIcon.Info); }
+            else { StopAudioRouting(); if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); } Application.Exit(); }
         }
 
         private void btnStop_Click(object sender, EventArgs e) => StopAudioRouting();
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (!gercektenKapat)
-            {
-                e.Cancel = true; this.Hide();
-                trayIcon.ShowBalloonTip(2000, "BluetoothTogether", "Running in the background.", ToolTipIcon.Info);
-            }
-            else
-            {
-                StopAudioRouting();
-                if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); }
-            }
+            if (!gercektenKapat) { e.Cancel = true; this.Hide(); trayIcon.ShowBalloonTip(2000, "BluetoothTogether", "Running in the background.", ToolTipIcon.Info); }
+            else { StopAudioRouting(); if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); } }
         }
 
         private void TrayIcon_DoubleClick(object sender, EventArgs e) { this.Show(); this.WindowState = FormWindowState.Normal; }
